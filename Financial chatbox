@@ -1,0 +1,189 @@
+# ui_app.py
+"""
+Streamlit frontend for the AI Personal Finance Chatbot
+- Friendly UI: sidebar profile, chat area, savings tracker, tax reminder
+- Integrates with backend endpoints if available:
+    POST /chat            -> {"user_id","message"}  returns {"reply"}
+    POST /bank-sync       -> {"user_id","provider_token"} returns {"status","transactions_count"}
+    GET  /recommendations/{user_id} returns {"recommendations": [...]}
+- Set API endpoint with env var API_BASE (default http://localhost:8000)
+"""
+import streamlit as st
+import os
+import requests
+from datetime import date
+
+API_BASE = os.getenv("API_BASE", "http://localhost:8000")
+
+st.set_page_config(page_title="Friendly Finance Chatbot", layout="wide", page_icon="💬")
+st.title("💬 Friendly Finance Chatbot")
+st.markdown("A simple, human-like assistant for **savings, taxes, and investments** — chat naturally and get helpful tips.")
+
+# -----------------------
+# Sidebar - Profile
+# -----------------------
+with st.sidebar:
+    st.header("👤 Your Profile")
+    user_id = st.text_input("User ID (for demo)", value="user_demo")
+    name = st.text_input("Name", value="Guest")
+    monthly_income = st.number_input("Monthly income (₹)", min_value=0, step=1000, value=30000)
+    monthly_expenses = st.number_input("Monthly expenses (₹)", min_value=0, step=500, value=18000)
+    financial_goal = st.text_input("Goal (e.g., Emergency fund, Car, Home)", value="Emergency fund")
+    save_profile = st.button("Save profile")
+    if save_profile:
+        st.success(f"Profile saved — Hi {name}! 👋")
+    st.markdown("---")
+    st.markdown("🔒 *Data shown here is demo-only. Connect a bank to enable real transaction syncing.*")
+    st.caption(f"Today: {date.today().strftime('%b %d, %Y')}")
+
+# Initialize session state for messages & transactions
+if "messages" not in st.session_state:
+    st.session_state.messages = []  # list of (role, text)
+if "transactions" not in st.session_state:
+    st.session_state.transactions = []  # list of dicts {date, amount, desc}
+
+# -----------------------
+# Main layout - columns
+# -----------------------
+chat_col, tools_col = st.columns([2.2, 1])
+
+# ---- Chat column ----
+with chat_col:
+    st.subheader("💬 Chat with your finance guide")
+    # show conversation
+    for role, msg in st.session_state.messages:
+        if role == "user":
+            st.markdown(f"**You:** {msg}")
+        else:
+            st.markdown(f"**Bot:** {msg}")
+
+    user_message = st.text_input("Ask a question (e.g., 'How much can I save?', 'Tax tips?')", key="user_input")
+
+    def append_and_show(user_msg, bot_reply):
+        st.session_state.messages.append(("user", user_msg))
+        st.session_state.messages.append(("bot", bot_reply))
+        # re-run to show updated conversation (Streamlit keeps session_state)
+    send = st.button("Send")
+
+    if send and user_message.strip():
+        # try backend chat API, else fallback to simple local replies
+        payload = {"user_id": user_id, "message": user_message}
+        try:
+            r = requests.post(f"{API_BASE}/chat", json=payload, timeout=6)
+            if r.ok:
+                bot_text = r.json().get("reply", "Sorry, I couldn't generate a reply.")
+            else:
+                bot_text = "Sorry — chat service returned an error. I'll try to help anyway."
+        except Exception:
+            # fallback simple rules
+            m = user_message.lower()
+            if "save" in m:
+                savings = monthly_income - monthly_expenses
+                if savings > 0:
+                    bot_text = f"Good news — you can save around ₹{savings} per month. Try saving 20% consistently."
+                else:
+                    bot_text = "It looks like expenses are higher than income. Let's identify non-essential spends to cut back."
+            elif "tax" in m:
+                bot_text = "Reminder: File taxes by 31st July. Consider 80C-equivalent tax-saving instruments (ELSS/PPF/NPS)."
+            elif "invest" in m:
+                bot_text = "Start small: SIPs in diversified mutual funds or a recurring deposit can be a good start."
+            else:
+                bot_text = "I can help with savings, tax reminders, investments and simple budgeting. Try asking something specific!"
+        append_and_show(user_message, bot_text)
+        st.experimental_rerun()
+
+    st.markdown("---")
+    st.subheader("🗂 Conversation Actions")
+    cols = st.columns(3)
+    if cols[0].button("Clear Chat"):
+        st.session_state.messages = []
+        st.success("Chat cleared.")
+    if cols[1].button("Get Recommendations"):
+        # call recommendations endpoint
+        try:
+            r = requests.get(f"{API_BASE}/recommendations/{user_id}", timeout=6)
+            if r.ok:
+                recs = r.json().get("recommendations", [])
+            else:
+                recs = ["Unable to fetch recommendations from server."]
+        except Exception:
+            recs = [
+                "Save at least 20% of income monthly.",
+                "Look into tax-exempt investments.",
+                "Start a small SIP and increase with salary hikes."
+            ]
+        st.info("🔎 Recommendations")
+        for rec in recs:
+            st.write("• " + rec)
+
+    # quick demo transactions viewer
+    if st.session_state.transactions:
+        st.markdown("**Recent transactions (demo):**")
+        for t in st.session_state.transactions[-5:]:
+            amt = t.get("amount")
+            desc = t.get("description", t.get("desc", ""))
+            dt = t.get("date", "")
+            st.write(f"- {dt}: {desc} — ₹{amt}")
+
+# ---- Tools column ----
+with tools_col:
+    st.subheader("📊 Budget & Savings")
+    st.metric("Monthly Income (₹)", monthly_income)
+    st.metric("Monthly Expenses (₹)", monthly_expenses)
+    monthly_savings = monthly_income - monthly_expenses
+    st.metric("Estimated Savings (₹)", monthly_savings)
+
+    savings_goal = st.number_input("Savings target per month (₹)", min_value=0, step=500, value=int(max(0, monthly_savings)))
+    if savings_goal > 0:
+        progress = min(max(monthly_savings / savings_goal, 0.0), 1.0) if savings_goal > 0 else 0.0
+        st.progress(progress)
+        if progress >= 1.0:
+            st.success(f"🎉 Goal met! You saved ₹{monthly_savings} this month.")
+        else:
+            st.info(f"You're {int(progress*100)}% towards your monthly target.")
+
+    st.markdown("---")
+    st.subheader("📅 Tax Reminder")
+    st.warning("⚠️ File your tax returns before **31st July 2025** (local deadline shown for demo).")
+    st.write("Tip: Use tax-saving instruments like ELSS / PPF / NPS or their local equivalents.")
+
+    st.markdown("---")
+    st.subheader("🔗 Bank Account (Demo)")
+    st.write("Connect a bank for real transaction sync (demo button below uses a safe stub).")
+    if st.button("Sync demo bank (safe stub)"):
+        try:
+            r = requests.post(f"{API_BASE}/bank-sync", json={"user_id": user_id, "provider_token": "demo_token"}, timeout=6)
+            if r.ok:
+                cnt = r.json().get("transactions_count", 0)
+                st.success(f"Bank synced: {cnt} transactions added (demo).")
+                # fetch transactions from backend recommendations endpoint or rely on local stub
+                # for demo we'll just add to session state
+                demo_txns = [
+                    {"date": "2025-09-01", "amount": -12.5, "description": "Coffee"},
+                    {"date": "2025-09-02", "amount": -450.0, "description": "Groceries"},
+                    {"date": "2025-09-05", "amount": 20000.0, "description": "Salary"},
+                ]
+                st.session_state.transactions.extend(demo_txns)
+            else:
+                st.error("Bank sync failed on server.")
+        except Exception:
+            # fallback demo
+            st.session_state.transactions.extend([
+                {"date": "2025-09-01", "amount": -12.5, "description": "Coffee"},
+                {"date": "2025-09-02", "amount": -450.0, "description": "Groceries"},
+                {"date": "2025-09-05", "amount": 20000.0, "description": "Salary"},
+            ])
+            st.success("Demo bank synced locally.")
+
+    st.markdown("---")
+    st.subheader("⭐ Quick Tips")
+    st.write("- Automate small monthly savings (SIP / recurring deposit).")
+    st.write("- Review subscriptions and cut unused ones.")
+    st.write("- Keep emergency fund of 3–6 months expenses.")
+
+# -----------------------
+# Footer
+# -----------------------
+st.markdown("---")
+st.markdown("Built with ❤️ using **Python + Streamlit**. Planned integrations: IBM Watson, HuggingFace, Granite, and secure bank sync.")
+st.caption("Tip: Set API_BASE environment variable if your backend is on another host (e.g., http://192.168.1.10:8000).")
