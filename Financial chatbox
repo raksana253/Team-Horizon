@@ -1,189 +1,185 @@
-# ui_app.py
+# finance_chatbot_ui.py
 """
-Streamlit frontend for the AI Personal Finance Chatbot
-- Friendly UI: sidebar profile, chat area, savings tracker, tax reminder
-- Integrates with backend endpoints if available:
-    POST /chat            -> {"user_id","message"}  returns {"reply"}
-    POST /bank-sync       -> {"user_id","provider_token"} returns {"status","transactions_count"}
-    GET  /recommendations/{user_id} returns {"recommendations": [...]}
-- Set API endpoint with env var API_BASE (default http://localhost:8000)
+Personal Finance Chatbot - User Interface with emojis
+Features:
+- Chat interface with human-like bot replies
+- Profile sidebar (income, expenses, goals)
+- Budget tracker + savings progress
+- Tax reminders
+- Investment recommendations
+- Demo bank sync (local transactions)
 """
+
 import streamlit as st
 import os
 import requests
 from datetime import date
 
+# -----------------------------
+# Configuration
+# -----------------------------
 API_BASE = os.getenv("API_BASE", "http://localhost:8000")
+st.set_page_config(page_title="💬 AI Finance Chatbot", layout="wide", page_icon="💰")
 
-st.set_page_config(page_title="Friendly Finance Chatbot", layout="wide", page_icon="💬")
-st.title("💬 Friendly Finance Chatbot")
-st.markdown("A simple, human-like assistant for **savings, taxes, and investments** — chat naturally and get helpful tips.")
+# -----------------------------
+# Title & Intro
+# -----------------------------
+st.title("💰 AI Personal Finance Assistant")
+st.markdown(
+    "Your *friendly finance companion* — helping you plan budgets, "
+    "track savings, get tax reminders, and explore smart investments 💡."
+)
 
-# -----------------------
-# Sidebar - Profile
-# -----------------------
+# -----------------------------
+# Sidebar - User Profile
+# -----------------------------
 with st.sidebar:
     st.header("👤 Your Profile")
-    user_id = st.text_input("User ID (for demo)", value="user_demo")
+    user_id = st.text_input("User ID (for demo)", value="demo_user")
     name = st.text_input("Name", value="Guest")
     monthly_income = st.number_input("Monthly income (₹)", min_value=0, step=1000, value=30000)
     monthly_expenses = st.number_input("Monthly expenses (₹)", min_value=0, step=500, value=18000)
-    financial_goal = st.text_input("Goal (e.g., Emergency fund, Car, Home)", value="Emergency fund")
-    save_profile = st.button("Save profile")
-    if save_profile:
-        st.success(f"Profile saved — Hi {name}! 👋")
+    goal = st.text_input("Financial Goal", value="Emergency Fund")
+
+    if st.button("💾 Save Profile"):
+        st.success(f"✅ Profile updated! Hi {name} 👋")
+    st.caption(f"📅 Today: {date.today().strftime('%b %d, %Y')}")
     st.markdown("---")
-    st.markdown("🔒 *Data shown here is demo-only. Connect a bank to enable real transaction syncing.*")
-    st.caption(f"Today: {date.today().strftime('%b %d, %Y')}")
+    st.markdown("🔒 Data is for demo only. Bank sync is simulated.")
 
-# Initialize session state for messages & transactions
+# -----------------------------
+# Session State
+# -----------------------------
 if "messages" not in st.session_state:
-    st.session_state.messages = []  # list of (role, text)
+    st.session_state.messages = []  # stores (role, text)
 if "transactions" not in st.session_state:
-    st.session_state.transactions = []  # list of dicts {date, amount, desc}
+    st.session_state.transactions = []
 
-# -----------------------
-# Main layout - columns
-# -----------------------
-chat_col, tools_col = st.columns([2.2, 1])
+# -----------------------------
+# Layout: Chat + Tools
+# -----------------------------
+chat_col, tools_col = st.columns([2.5, 1.5])
 
-# ---- Chat column ----
+# -----------------------------
+# Chat Interface
+# -----------------------------
 with chat_col:
     st.subheader("💬 Chat with your finance guide")
-    # show conversation
+
     for role, msg in st.session_state.messages:
         if role == "user":
-            st.markdown(f"**You:** {msg}")
+            st.markdown(f"*You:* {msg}")
         else:
-            st.markdown(f"**Bot:** {msg}")
+            st.markdown(f"*Bot:* {msg}")
 
-    user_message = st.text_input("Ask a question (e.g., 'How much can I save?', 'Tax tips?')", key="user_input")
-
-    def append_and_show(user_msg, bot_reply):
-        st.session_state.messages.append(("user", user_msg))
-        st.session_state.messages.append(("bot", bot_reply))
-        # re-run to show updated conversation (Streamlit keeps session_state)
+    user_message = st.text_input("Type your question here...", key="chat_input")
     send = st.button("Send")
 
     if send and user_message.strip():
-        # try backend chat API, else fallback to simple local replies
         payload = {"user_id": user_id, "message": user_message}
+        bot_text = None
+
+        # Try backend API if available
         try:
             r = requests.post(f"{API_BASE}/chat", json=payload, timeout=6)
             if r.ok:
-                bot_text = r.json().get("reply", "Sorry, I couldn't generate a reply.")
-            else:
-                bot_text = "Sorry — chat service returned an error. I'll try to help anyway."
+                bot_text = r.json().get("reply", "🤔 Sorry, I couldn't process that.")
         except Exception:
-            # fallback simple rules
+            pass
+
+        # Fallback to local demo replies
+        if not bot_text:
             m = user_message.lower()
             if "save" in m:
                 savings = monthly_income - monthly_expenses
-                if savings > 0:
-                    bot_text = f"Good news — you can save around ₹{savings} per month. Try saving 20% consistently."
-                else:
-                    bot_text = "It looks like expenses are higher than income. Let's identify non-essential spends to cut back."
+                bot_text = (
+                    f"💡 You can save around ₹{savings} this month. "
+                    "Try automating 20% into a recurring deposit or SIP."
+                )
             elif "tax" in m:
-                bot_text = "Reminder: File taxes by 31st July. Consider 80C-equivalent tax-saving instruments (ELSS/PPF/NPS)."
+                bot_text = (
+                    "⏳ Reminder: File taxes by *31st July*. "
+                    "Consider 80C-equivalent options like ELSS, PPF, or NPS."
+                )
             elif "invest" in m:
-                bot_text = "Start small: SIPs in diversified mutual funds or a recurring deposit can be a good start."
+                bot_text = (
+                    "📈 Start small with SIPs or recurring deposits. "
+                    "Diversify as your savings grow."
+                )
             else:
-                bot_text = "I can help with savings, tax reminders, investments and simple budgeting. Try asking something specific!"
-        append_and_show(user_message, bot_text)
+                bot_text = (
+                    "🤖 I can help with *savings, budgeting, tax reminders, and investments*. "
+                    "Try asking: How much can I save?"
+                )
+
+        st.session_state.messages.append(("user", user_message))
+        st.session_state.messages.append(("bot", bot_text))
         st.experimental_rerun()
 
     st.markdown("---")
-    st.subheader("🗂 Conversation Actions")
-    cols = st.columns(3)
-    if cols[0].button("Clear Chat"):
+    if st.button("🧹 Clear Chat"):
         st.session_state.messages = []
-        st.success("Chat cleared.")
-    if cols[1].button("Get Recommendations"):
-        # call recommendations endpoint
+        st.success("🗑 Chat history cleared.")
+
+    if st.button("📊 Get Recommendations"):
         try:
             r = requests.get(f"{API_BASE}/recommendations/{user_id}", timeout=6)
             if r.ok:
                 recs = r.json().get("recommendations", [])
             else:
-                recs = ["Unable to fetch recommendations from server."]
+                recs = []
         except Exception:
             recs = [
-                "Save at least 20% of income monthly.",
-                "Look into tax-exempt investments.",
-                "Start a small SIP and increase with salary hikes."
+                "💰 Save at least 20% of your income.",
+                "✂ Cut unnecessary subscriptions.",
+                "🛡 Build an emergency fund covering 3–6 months."
             ]
-        st.info("🔎 Recommendations")
+        st.info("💡 Recommendations:")
         for rec in recs:
-            st.write("• " + rec)
+            st.write("- " + rec)
 
-    # quick demo transactions viewer
-    if st.session_state.transactions:
-        st.markdown("**Recent transactions (demo):**")
-        for t in st.session_state.transactions[-5:]:
-            amt = t.get("amount")
-            desc = t.get("description", t.get("desc", ""))
-            dt = t.get("date", "")
-            st.write(f"- {dt}: {desc} — ₹{amt}")
+# -----------------------------
+# Tools Column (Budget, Tax, Bank)
 
-# ---- Tools column ----
 with tools_col:
     st.subheader("📊 Budget & Savings")
-    st.metric("Monthly Income (₹)", monthly_income)
-    st.metric("Monthly Expenses (₹)", monthly_expenses)
-    monthly_savings = monthly_income - monthly_expenses
-    st.metric("Estimated Savings (₹)", monthly_savings)
+    savings = monthly_income - monthly_expenses
+    st.metric("Income 💵", f"₹{monthly_income}")
+    st.metric("Expenses 💸", f"₹{monthly_expenses}")
+    st.metric("Estimated Savings 💰", f"₹{savings}")
 
-    savings_goal = st.number_input("Savings target per month (₹)", min_value=0, step=500, value=int(max(0, monthly_savings)))
-    if savings_goal > 0:
-        progress = min(max(monthly_savings / savings_goal, 0.0), 1.0) if savings_goal > 0 else 0.0
+    target = st.number_input("Set monthly savings target (₹)", min_value=0, step=500, value=savings)
+    if target > 0:
+        progress = min(max(savings / target, 0.0), 1.0)
         st.progress(progress)
-        if progress >= 1.0:
-            st.success(f"🎉 Goal met! You saved ₹{monthly_savings} this month.")
+        if progress >= 1:
+            st.success("🎉 Goal achieved!")
         else:
-            st.info(f"You're {int(progress*100)}% towards your monthly target.")
+            st.info(f"You're {int(progress * 100)}% towards your goal.")
 
     st.markdown("---")
     st.subheader("📅 Tax Reminder")
-    st.warning("⚠️ File your tax returns before **31st July 2025** (local deadline shown for demo).")
-    st.write("Tip: Use tax-saving instruments like ELSS / PPF / NPS or their local equivalents.")
+    st.warning("⚠ File income tax returns by *31st July 2025*.")
+    st.caption("Tip: Explore tax-saving investments like ELSS / PPF / NPS.")
 
     st.markdown("---")
-    st.subheader("🔗 Bank Account (Demo)")
-    st.write("Connect a bank for real transaction sync (demo button below uses a safe stub).")
-    if st.button("Sync demo bank (safe stub)"):
-        try:
-            r = requests.post(f"{API_BASE}/bank-sync", json={"user_id": user_id, "provider_token": "demo_token"}, timeout=6)
-            if r.ok:
-                cnt = r.json().get("transactions_count", 0)
-                st.success(f"Bank synced: {cnt} transactions added (demo).")
-                # fetch transactions from backend recommendations endpoint or rely on local stub
-                # for demo we'll just add to session state
-                demo_txns = [
-                    {"date": "2025-09-01", "amount": -12.5, "description": "Coffee"},
-                    {"date": "2025-09-02", "amount": -450.0, "description": "Groceries"},
-                    {"date": "2025-09-05", "amount": 20000.0, "description": "Salary"},
-                ]
-                st.session_state.transactions.extend(demo_txns)
-            else:
-                st.error("Bank sync failed on server.")
-        except Exception:
-            # fallback demo
-            st.session_state.transactions.extend([
-                {"date": "2025-09-01", "amount": -12.5, "description": "Coffee"},
-                {"date": "2025-09-02", "amount": -450.0, "description": "Groceries"},
-                {"date": "2025-09-05", "amount": 20000.0, "description": "Salary"},
-            ])
-            st.success("Demo bank synced locally.")
+    st.subheader("🏦 Bank Sync (Demo)")
+    if st.button("🔗 Sync Bank Data"):
+        demo_txns = [
+            {"date": "2025-09-01", "amount": -1500, "desc": "Groceries"},
+            {"date": "2025-09-03", "amount": -200, "desc": "Coffee"},
+            {"date": "2025-09-05", "amount": 30000, "desc": "Salary"},
+        ]
+        st.session_state.transactions.extend(demo_txns)
+        st.success("✅ Bank synced (demo data added).")
+
+    if st.session_state.transactions:
+        st.write("*Recent Transactions:*")
+        for t in st.session_state.transactions[-5:]:
+            st.write(f"- {t['date']}: {t['desc']} — ₹{t['amount']}")
 
     st.markdown("---")
-    st.subheader("⭐ Quick Tips")
-    st.write("- Automate small monthly savings (SIP / recurring deposit).")
-    st.write("- Review subscriptions and cut unused ones.")
-    st.write("- Keep emergency fund of 3–6 months expenses.")
-
-# -----------------------
-# Footer
-# -----------------------
-st.markdown("---")
-st.markdown("Built with ❤️ using **Python + Streamlit**. Planned integrations: IBM Watson, HuggingFace, Granite, and secure bank sync.")
-st.caption("Tip: Set API_BASE environment variable if your backend is on another host (e.g., http://192.168.1.10:8000).")
+    st.subheader("✨ Quick Tips")
+    st.write("- Automate savings with recurring deposits.")
+    st.write("- Avoid high-interest loans when possible.")
+    st.write("- Review expenses monthly to stay on track.")
